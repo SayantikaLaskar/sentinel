@@ -7,6 +7,11 @@ Provides:
 - log_episode_metrics(): append JSON line to log file
 - save_checkpoint() / load_latest_checkpoint(): persistent episode counter
 - run_training_loop(): full training loop with OOM handling and checkpointing
+
+Action selection priority (highest to lowest):
+  1. GRPOTrainer.generate()         — full fine-tuned model (GPU required)
+  2. HuggingFace Inference API      — Llama-3-8B via HF_TOKEN (no local GPU)
+  3. HOLMES/FORGE heuristic agents  — observation-driven, no LLM required
 """
 from __future__ import annotations
 
@@ -17,6 +22,9 @@ import uuid
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from sentinel.config import load_config
+from sentinel.llm_client import get_hf_client
 
 logger = logging.getLogger(__name__)
 
@@ -213,13 +221,91 @@ def load_latest_checkpoint(checkpoint_dir: str) -> dict | None:
 # Training loop
 # ---------------------------------------------------------------------------
 
-# Placeholder action used when no real model is available
-_PLACEHOLDER_ACTION = {
-    "agent": "holmes",
-    "category": "investigative",
-    "name": "QueryLogs",
-    "params": {"service": "cart-service", "time_range": [0, 60]},
-}
+def get_heuristic_action(obs: dict, agent_role: str = "holmes") -> dict:
+    """Return an observation-driven action using the HOLMES or FORGE heuristic agent.
+
+    This replaces the old static placeholder — actions are now derived from
+    what the observation actually shows (blast radius, alerts, hypotheses).
+    """
+    import json as _json
+
+    # Parse incident context from observation
+    incident_ctx_raw = obs.get("incident_context", "{}")
+    if isinstance(incident_ctx_raw, str):
+        try:
+            incident_ctx = _json.loads(incident_ctx_raw)
+        except _json.JSONDecodeError:
+            incident_ctx = {}
+    else:
+        incident_ctx = incident_ctx_raw
+
+    blast_radius: list[str] = incident_ctx.get("current_blast_radius", [])
+    hypotheses: list[dict] = incident_ctx.get("active_hypotheses", [])
+
+    # Parse active alerts
+    alerts_raw = obs.get("active_alerts", "[]")
+    if isinstance(alerts_raw, str):
+        try:
+            alerts = _json.loads(alerts_raw)
+        except _json.JSONDecodeError:
+            alerts = []
+    else:
+        alerts = alerts_raw
+
+    alert_service_counts: dict[str, int] = {}
+    for a in alerts:
+        svc = a.get("service", "") if isinstance(a, dict) else getattr(a, "service", "")
+        if svc:
+            alert_service_counts[svc] = alert_service_counts.get(svc, 0) + 1
+
+    # Pick most-alerted service or first blast-radius service
+    if alert_service_counts:
+        top_service = max(alert_service_counts, key=alert_service_counts.__getitem__)
+    elif blast_radius:
+        top_service = blast_radius[0]
+    else:
+        top_service = "api-gateway"  # safe default that always exists in NexaStack
+
+    if agent_role == "forge":
+        # FORGE: remediate the highest-confidence hypothesis or most-alerted service
+        if hypotheses:
+            best = max(
+                hypotheses,
+                key=lambda h: h.get("confidence", 0.0) if isinstance(h, dict)
+                else getattr(h, "confidence", 0.0),
+            )
+            target = best.get("service", top_service) if isinstance(best, dict) else getattr(best, "service", top_service)
+        else:
+            target = top_service
+        return {
+            "agent": "forge",
+            "category": "remediation",
+            "name": "RestartService",
+            "params": {"service": target},
+        }
+
+    # Default: HOLMES investigates the most-alerted service
+    return {
+        "agent": "holmes",
+        "category": "investigative",
+        "name": "QueryLogs",
+        "params": {"service": top_service, "time_range": [0, 300]},
+    }
+
+
+# Keep get_placeholder_action as an alias for backward compatibility (demo/app.py)
+def get_placeholder_action(config_path: str = "env_spec.yaml") -> dict[str, Any]:
+    """Backward-compatible alias — returns config-driven action for initial demo seeding."""
+    try:
+        cfg = load_config(config_path)
+        return dict(cfg.training.placeholder_action)
+    except Exception:
+        return {
+            "agent": "holmes",
+            "category": "investigative",
+            "name": "QueryMetrics",
+            "params": {"service": "api-gateway", "metric_name": "error_rate", "time_range": [0, 300]},
+        }
 
 
 def run_training_loop(
@@ -393,10 +479,28 @@ def _execute_episode(
 
 
 def _get_action(trainer: Any, obs: dict, config: TrainingConfig) -> dict:
-    """Return an action dict from the trainer or the placeholder."""
+    """Return an action dict using the best available method.
+
+    Priority:
+      1. GRPOTrainer.generate()     — full fine-tuned model
+      2. HF Inference API           — Llama-3-8B via HF_TOKEN
+      3. Heuristic agent (HOLMES)   — observation-driven, no LLM
+    """
+    # 1. Fine-tuned GRPO model
     if trainer is not None and hasattr(trainer, "generate"):
         try:
             return trainer.generate(obs)
-        except Exception:
-            pass
-    return dict(_PLACEHOLDER_ACTION)
+        except Exception as exc:
+            logger.debug("trainer.generate failed: %s", exc)
+
+    # 2. HuggingFace Inference API
+    hf = get_hf_client()
+    if hf is not None:
+        agent_role = config.agent if hasattr(config, "agent") else "holmes"
+        action = hf.generate_action(obs, agent_role=agent_role)
+        if action is not None:
+            return action
+
+    # 3. Observation-driven heuristic (never a fixed static action)
+    agent_role = getattr(config, "agent", "holmes")
+    return get_heuristic_action(obs, agent_role=agent_role)

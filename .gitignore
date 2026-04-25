@@ -1,6 +1,9 @@
 # Python
 __pycache__/
 *.py[cod]
+
+# Credentials — NEVER commit
+.env
 *.pyo
 *.pyd
 *.egg-info/

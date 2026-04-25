@@ -67,6 +67,9 @@ class TrainingConfig:
     checkpoint_dir: str = "checkpoints"
     log_file: str = "training_log.jsonl"
     sla_breach_threshold: int = 50
+    max_completion_length: int = 128
+    parser_failure_abort_rate: float = 0.6
+    parser_failure_warmup_steps: int = 8
 
 
 @dataclass
@@ -163,9 +166,9 @@ def build_grpo_trainer(
         per_device_train_batch_size=config.batch_size,
         max_steps=config.max_steps,
         num_generations=2,
-        max_completion_length=512,
-        temperature=0.7,
-        top_p=0.9,
+        max_completion_length=config.max_completion_length,
+        temperature=0.1,
+        top_p=1.0,
         learning_rate=5e-6,
         lr_scheduler_type="cosine",
         warmup_steps=10,
@@ -394,8 +397,10 @@ def _execute_episode(
         # ─ Select action ──────────────────────────────────────────────────────
         action_dict = llm_agent.act(obs, step=step_count)
         llm_completion = action_dict.pop("_llm_completion", None)
+        parse_failed = bool(action_dict.pop("_parse_failed", False))
 
         obs_next, reward, terminated, truncated, step_info = env.step(action_dict)
+        step_info["parse_failed"] = parse_failed
 
         # ─ Record GRPO sample ─────────────────────────────────────────────
         if llm_completion is not None:
@@ -403,6 +408,7 @@ def _execute_episode(
                 "prompt":     text_prompt,
                 "completion": llm_completion,
                 "reward":     float(reward),
+                "parse_failed": parse_failed,
             })
 
         try:
@@ -432,6 +438,14 @@ def _execute_episode(
         )
         obs = obs_next
         step_count += 1
+
+        if step_count >= config.parser_failure_warmup_steps:
+            parse_failures = sum(1 for sample in grpo_samples if sample.get("parse_failed"))
+            failure_rate = parse_failures / max(len(grpo_samples), 1)
+            if failure_rate >= config.parser_failure_abort_rate:
+                raise RuntimeError(
+                    f"Parser failure rate too high ({failure_rate:.2f}) at episode {episode}; aborting early to avoid wasting GPU."
+                )
 
     # ─ Build trajectory ─────────────────────────────────────────────────
     episode_id = info.get("incident_id", str(uuid.uuid4()))

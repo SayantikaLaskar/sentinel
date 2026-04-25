@@ -9,9 +9,10 @@ Provides:
 - run_training_loop(): full training loop with OOM handling and checkpointing
 
 Action selection priority (highest to lowest):
-  1. GRPOTrainer.generate()         — full fine-tuned model (GPU required)
-  2. HuggingFace Inference API      — Llama-3-8B via HF_TOKEN (no local GPU)
-  3. HOLMES/FORGE heuristic agents  — observation-driven, no LLM required
+  1. GRPOTrainer.generate()       — full fine-tuned model (GPU required)
+  2. UCB1 + Bayesian RCA          — observation-driven math (no GPU, no API)
+     UCB1: Auer, Cesa-Bianchi & Fischer (2002). Machine Learning, 47, 235-256.
+     Bayes: Noisy-OR belief propagation (Pearl 1988 / MicroRank WWW 2021).
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from sentinel.config import load_config
-from sentinel.llm_client import get_hf_client
+from sentinel.math_engine import get_bayesian_rca, get_ucb1_bandit
 
 logger = logging.getLogger(__name__)
 
@@ -482,9 +483,8 @@ def _get_action(trainer: Any, obs: dict, config: TrainingConfig) -> dict:
     """Return an action dict using the best available method.
 
     Priority:
-      1. GRPOTrainer.generate()     — full fine-tuned model
-      2. HF Inference API           — Llama-3-8B via HF_TOKEN
-      3. Heuristic agent (HOLMES)   — observation-driven, no LLM
+      1. GRPOTrainer.generate()  — full fine-tuned model
+      2. UCB1 bandit + Bayesian RCA (math-only, no API needed)
     """
     # 1. Fine-tuned GRPO model
     if trainer is not None and hasattr(trainer, "generate"):
@@ -493,14 +493,114 @@ def _get_action(trainer: Any, obs: dict, config: TrainingConfig) -> dict:
         except Exception as exc:
             logger.debug("trainer.generate failed: %s", exc)
 
-    # 2. HuggingFace Inference API
-    hf = get_hf_client()
-    if hf is not None:
-        agent_role = config.agent if hasattr(config, "agent") else "holmes"
-        action = hf.generate_action(obs, agent_role=agent_role)
-        if action is not None:
-            return action
+    # 2. UCB1 bandit selects action arm; Bayesian RCA fills params
+    return _ucb1_math_action(obs, config)
 
-    # 3. Observation-driven heuristic (never a fixed static action)
-    agent_role = getattr(config, "agent", "holmes")
-    return get_heuristic_action(obs, agent_role=agent_role)
+
+def _ucb1_math_action(obs: dict, config: TrainingConfig) -> dict:
+    """Select and fill an action using UCB1 bandit + Bayesian RCA.
+
+    UCB1 (Auer et al. 2002) selects which action type to try next.
+    Bayesian Noisy-OR (Pearl 1988) identifies the most likely root-cause
+    service and fills action parameters accordingly.
+    The chosen arm is updated with the step reward after env.step().
+    """
+    bandit = get_ucb1_bandit()
+    rca = get_bayesian_rca()
+
+    # UCB1: select arm
+    arm_idx = bandit.select()
+    action = bandit.get_action_template(arm_idx)
+
+    # Bayesian RCA: identify top-k candidate services
+    top_candidates = rca.top_k(obs, k=3)
+    top_service = top_candidates[0][0] if top_candidates else "api-gateway"
+    top_ft = _infer_failure_type(obs, top_service)
+
+    # Fill params based on action name
+    name = action.get("name", "QueryLogs")
+    params = _fill_params(name, top_service, top_ft, obs)
+    action["params"] = params
+
+    # Attach arm_idx so the training loop can update the bandit after the step
+    action["_ucb1_arm_idx"] = arm_idx
+    return action
+
+
+def _infer_failure_type(obs: dict, service: str) -> str:
+    """Heuristically infer likely failure type from metric anomaly pattern."""
+    metrics_raw = obs.get("metrics_snapshot", "{}")
+    if isinstance(metrics_raw, str):
+        try:
+            snap = json.loads(metrics_raw)
+        except json.JSONDecodeError:
+            snap = {}
+    else:
+        snap = metrics_raw or {}
+
+    m = snap.get(service)
+    if not m:
+        return "cpu_spike"
+    if isinstance(m, dict):
+        cpu = m.get("cpu", 0)
+        mem = m.get("memory", 0)
+        err = m.get("error_rate", 0)
+        lat = m.get("latency_ms", 0)
+        sat = m.get("saturation", 0)
+    else:
+        cpu = getattr(m, "cpu", 0)
+        mem = getattr(m, "memory", 0)
+        err = getattr(m, "error_rate", 0)
+        lat = getattr(m, "latency_ms", 0)
+        sat = getattr(m, "saturation", 0)
+
+    # Simple threshold-based classification
+    if cpu > 0.85:
+        return "cpu_spike"
+    if mem > 0.85:
+        return "memory_leak"
+    if err > 0.1 and lat > 300:
+        return "bad_deployment"
+    if sat > 0.9:
+        return "connection_pool_exhaustion"
+    if err > 0.05:
+        return "cache_miss_storm"
+    return "network_partition"
+
+
+def _fill_params(name: str, service: str, failure_type: str, obs: dict) -> dict:
+    """Fill action parameters from Bayesian RCA output."""
+    if name == "QueryLogs":
+        return {"service": service, "time_range": [0, 300]}
+    if name == "QueryMetrics":
+        _metric_map = {
+            "cpu_spike": "cpu",
+            "memory_leak": "memory",
+            "bad_deployment": "error_rate",
+            "connection_pool_exhaustion": "saturation",
+            "cache_miss_storm": "error_rate",
+            "network_partition": "latency_ms",
+        }
+        return {"service": service, "metric_name": _metric_map.get(failure_type, "error_rate"), "time_range": [0, 300]}
+    if name == "QueryTrace":
+        return {"trace_id": f"{service}-trace-001"}
+    if name == "FormHypothesis":
+        return {"service": service, "failure_type": failure_type, "confidence": 0.75}
+    if name == "RestartService":
+        return {"service": service}
+    if name == "ScaleService":
+        return {"service": service, "replicas": 3}
+    if name == "RollbackDeployment":
+        return {"service": service, "version": "previous"}
+    if name == "DrainTraffic":
+        return {"service": service}
+    if name == "ModifyRateLimit":
+        return {"service": service, "limit_rps": 100}
+    if name == "CloseIncident":
+        return {"resolution_summary": f"Root cause identified: {service} ({failure_type})"}
+    if name == "EscalateToHuman":
+        return {"reason": f"High uncertainty about root cause in {service}"}
+    if name == "GenerateNewScenario":
+        return {"difficulty": "medium", "target_gap": "investigative"}
+    return {}
+

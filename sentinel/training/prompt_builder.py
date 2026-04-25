@@ -149,7 +149,7 @@ def build_prompt(
         f"{user_block}"
         f"<|eot_id|>"
         f"<|start_header_id|>assistant<|end_header_id|>\n\n"
-        f"<think>\n"
+        f"```json\n{{"
     )
     return prompt
 
@@ -159,13 +159,18 @@ def build_messages(
     agent_role: str = "holmes",
     step_number: int = 0,
 ) -> list[dict[str, str]]:
-    """Return messages list for tokenizer.apply_chat_template(messages, ...)."""
+    """Return messages list for tokenizer.apply_chat_template(messages, ...).
+
+    The assistant turn is pre-filled with '```json\n{' which forces
+    Llama-3 / Qwen2.5 to complete a JSON block rather than prose.
+    """
     system = _SYSTEM_PROMPTS.get(agent_role, _SYSTEM_PROMPTS["holmes"])
     user_block = _format_observation(obs, step_number)
     return [
         {"role": "system",    "content": f"{system}\n\n{_ACTION_SCHEMA}"},
         {"role": "user",      "content": user_block},
-        {"role": "assistant", "content": "<think>\n"},
+        # Pre-fill assistant with opening JSON fence → forces structured output
+        {"role": "assistant", "content": "```json\n{"},
     ]
 
 
@@ -247,7 +252,15 @@ def _format_observation(obs: dict[str, Any], step_number: int) -> str:
                      f"MTTR so far: {sla.get('current_mttr', step_number)} steps")
         lines.append("")
 
-    lines.append("Based on the above, reason step-by-step, then output your action as JSON.")
+    lines.append(
+        "IMPORTANT: Respond with ONLY a JSON code block — no prose, no explanation.\n"
+        "Example:\n"
+        "```json\n"
+        "{\"agent\": \"holmes\", \"category\": \"investigative\", "
+        "\"name\": \"QueryLogs\", \"params\": {\"service\": \"postgres-primary\", "
+        "\"time_range\": [0, 300]}}\n"
+        "```"
+    )
     return "\n".join(lines)
 
 

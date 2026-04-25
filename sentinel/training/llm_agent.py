@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_GEN_KWARGS: dict[str, Any] = {
-    "max_new_tokens": 512,
-    "temperature":    0.7,
+    "max_new_tokens": 256,    # JSON action is short; cap to avoid rambling
+    "temperature":    0.3,    # lower = more deterministic JSON output
     "top_p":          0.9,
     "do_sample":      True,
     "pad_token_id":   0,      # overridden per tokenizer in __init__
@@ -70,6 +70,13 @@ class LLMAgent:
         gen_kwargs = dict(_DEFAULT_GEN_KWARGS)
         if hasattr(tokenizer, "eos_token_id") and tokenizer.eos_token_id is not None:
             gen_kwargs["pad_token_id"] = tokenizer.eos_token_id
+
+        # Stop generation at the closing fence so the model doesn't ramble past the JSON
+        stop_strings = ["```", "}\n```", "}\n\n"]
+        if hasattr(tokenizer, "convert_tokens_to_ids"):
+            gen_kwargs["stop_strings"] = stop_strings
+            gen_kwargs["tokenizer"] = tokenizer
+
         self._gen_kwargs = gen_kwargs
 
     # ------------------------------------------------------------------
@@ -121,11 +128,22 @@ class LLMAgent:
 
         if self.use_chat_template and hasattr(self.tokenizer, "apply_chat_template"):
             messages = build_messages(obs, self.agent_role, step)
-            input_text = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            # continue_final_message=True honours the assistant pre-fill
+            # ("```json\n{") so the model completes JSON, not prose.
+            try:
+                input_text = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                    continue_final_message=True,
+                )
+            except TypeError:
+                # Older transformers versions don't have continue_final_message
+                input_text = self.tokenizer.apply_chat_template(
+                    messages[:-1],          # drop pre-filled assistant turn
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
         else:
             input_text = build_prompt(obs, self.agent_role, step)
 
@@ -146,7 +164,16 @@ class LLMAgent:
 
         # Decode only the NEW tokens (skip input)
         new_tokens = output_ids[0][inputs["input_ids"].shape[-1]:]
-        return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+        raw = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+        # Re-attach the pre-fill prefix so the parser sees a complete block
+        # e.g. model generates: '"agent": "holmes"...}```'
+        #      we return:       '```json\n{"agent": "holmes"...}```'
+        if self.use_chat_template:
+            raw = "```json\n{" + raw
+
+        return raw
+
 
     def _fallback_action(self) -> dict[str, Any]:
         """Return a safe default action matching this agent's role."""

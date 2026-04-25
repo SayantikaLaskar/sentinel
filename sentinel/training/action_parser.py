@@ -105,14 +105,26 @@ def parse_llm_action(
     # 1. Strip <think> scratchpad
     cleaned = _THINK_RE.sub("", llm_output).strip()
 
-    # 2. Try extracting JSON from code block
+    # 2. Try extracting JSON from ```json ... ``` code block
     action = _extract_from_code_block(cleaned)
 
-    # 3. Fall back to raw JSON object extraction
+    # 3. Fall back to raw JSON object (outermost {…})
     if action is None:
         action = _extract_raw_json(cleaned)
 
-    # 4. Fall back to safe default
+    # 4. Keyword scan — find `"agent":` and extract surrounding object
+    if action is None:
+        action = _extract_by_keyword(cleaned)
+
+    # 5. Brace-walk — try every `{` position in the text
+    if action is None:
+        action = _extract_by_brace_walk(cleaned)
+
+    # 6. Last resort — repair truncated JSON by appending missing closing braces
+    if action is None:
+        action = _extract_by_repair(cleaned)
+
+    # 7. Fall back to safe default
     if action is None:
         logger.warning(
             "parse_llm_action: could not extract JSON from output (len=%d). "
@@ -121,7 +133,7 @@ def parse_llm_action(
         )
         return _safe_fallback(fallback_agent)
 
-    # 5. Validate and repair
+    # 8. Validate and repair
     return _validate_and_repair(action, fallback_agent)
 
 
@@ -139,6 +151,82 @@ def extract_think(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _extract_by_keyword(text: str) -> dict | None:
+    """Find first '{' after an 'agent' key mention and extract that object."""
+    # Model often writes prose then puts the JSON inline:
+    # "... here is the action: {"agent": "holmes", ...}"
+    idx = text.find('"agent"')
+    if idx == -1:
+        idx = text.find("'agent'")
+    if idx == -1:
+        return None
+    # Walk backwards to find the opening brace
+    start = text.rfind("{", 0, idx)
+    if start == -1:
+        return None
+    return _extract_balanced_object(text, start)
+
+
+def _extract_by_brace_walk(text: str) -> dict | None:
+    """Try every '{' position and return the first parseable action dict."""
+    for i, ch in enumerate(text):
+        if ch == "{":
+            candidate = _extract_balanced_object(text, i)
+            if candidate and "agent" in candidate and "name" in candidate:
+                return candidate
+    return None
+
+
+def _extract_by_repair(text: str) -> dict | None:
+    """Last-resort: find the first '{' and try to repair truncated JSON.
+
+    The model sometimes generates valid JSON but stops mid-way (e.g. the
+    closing '}' is cut off by max_new_tokens).  We find the opening brace,
+    then try appending 1–3 closing braces to make it parseable.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    fragment = text[start:].rstrip()
+    # Strip trailing non-JSON noise (e.g. "```" fence leftovers)
+    for noise in ("```", "---", "==="):
+        if fragment.endswith(noise):
+            fragment = fragment[: -len(noise)].rstrip()
+    # Try appending up to 3 closing braces
+    for extra in ("}", "}}", "}}}"):
+        candidate = _try_parse(fragment + extra)
+        if candidate and "agent" in candidate and "name" in candidate:
+            return candidate
+    return None
+
+
+def _extract_balanced_object(text: str, start: int) -> dict | None:
+    """Extract a balanced {…} substring starting at `start` and parse it."""
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_str:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return _try_parse(text[start : i + 1])
+    return None
+
 
 def _extract_from_code_block(text: str) -> dict | None:
     """Extract first JSON code block and parse it."""

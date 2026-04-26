@@ -3,6 +3,7 @@
 This is the active training path:
   - action selection is driven by an LLMAgent during rollouts
   - GRPO uses SENTINEL rewards as the optimisation signal
+  - TensorBoard experiment tracking logs all metrics per episode
 """
 from __future__ import annotations
 
@@ -44,6 +45,17 @@ except Exception as _trl_err:  # ImportError when not installed
     GRPOConfig = None  # type: ignore
     _TRL_AVAILABLE = False
 
+# ---------------------------------------------------------------------------
+# TensorBoard experiment tracking
+# ---------------------------------------------------------------------------
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    _TB_AVAILABLE = True
+except ImportError:
+    SummaryWriter = None  # type: ignore
+    _TB_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -69,6 +81,8 @@ class TrainingConfig:
     max_completion_length: int = 96
     parser_failure_abort_rate: float = 0.6
     parser_failure_warmup_steps: int = 8
+    experiment_tracking: bool = True
+    tb_log_dir: str = "runs"
 
 
 @dataclass
@@ -260,6 +274,26 @@ def run_training_loop(
         config.max_steps, "LLM", start_episode,
     )
 
+    # ── TensorBoard experiment tracking ───────────────────────────────────
+    tb_writer = None
+    if config.experiment_tracking and _TB_AVAILABLE:
+        import time as _time
+        run_name = f"{config.agent}_{int(_time.time())}"
+        log_dir = os.path.join(config.tb_log_dir, run_name)
+        tb_writer = SummaryWriter(log_dir=log_dir)
+        logger.info("TensorBoard experiment tracking ON → %s", log_dir)
+        # Log hyperparameters
+        tb_writer.add_text("hparams/agent", config.agent, 0)
+        tb_writer.add_text("hparams/model", config.model_name, 0)
+        tb_writer.add_text("hparams/lora", f"r={config.lora_r} alpha={config.lora_alpha}", 0)
+        tb_writer.add_text("hparams/batch_size", str(config.batch_size), 0)
+        tb_writer.add_text("hparams/episodes", str(config.max_steps), 0)
+    elif config.experiment_tracking and not _TB_AVAILABLE:
+        logger.warning(
+            "experiment_tracking=True but tensorboard is not installed. "
+            "Install with: pip install tensorboard"
+        )
+
     for episode in range(start_episode, config.max_steps):
         # Clear CUDA cache between episodes to prevent memory fragmentation
         try:
@@ -280,6 +314,17 @@ def run_training_loop(
         all_metrics.append(metrics)
         log_episode_metrics(metrics, config.log_file)
 
+        # ── TensorBoard per-episode logging ───────────────────────────────
+        if tb_writer is not None:
+            tb_writer.add_scalar("reward/r1_root_cause", metrics.r1, episode)
+            tb_writer.add_scalar("reward/r2_mttr", metrics.r2, episode)
+            tb_writer.add_scalar("reward/r3_recovery", metrics.r3, episode)
+            tb_writer.add_scalar("reward/r4_blast_radius", metrics.r4, episode)
+            tb_writer.add_scalar("reward/total", metrics.total_reward, episode)
+            tb_writer.add_scalar("episode/mttr", metrics.mttr, episode)
+            if metrics.loss is not None:
+                tb_writer.add_scalar("train/loss", metrics.loss, episode)
+
         logger.info(
             "Episode %4d | R1=%.2f R2=%.2f R3=%.2f R4=%.2f | Total=%.3f | MTTR=%d | loss=%s",
             episode, metrics.r1, metrics.r2, metrics.r3, metrics.r4,
@@ -294,6 +339,28 @@ def run_training_loop(
                 "mode": "LLM",
             }
             save_checkpoint(state, config.checkpoint_dir, episode)
+
+    # ── Close TensorBoard writer ──────────────────────────────────────────
+    if tb_writer is not None:
+        if all_metrics:
+            last_n = all_metrics[-min(10, len(all_metrics)):]
+            hparam_dict = {
+                "agent": config.agent,
+                "model": config.model_name,
+                "lora_r": config.lora_r,
+                "lora_alpha": config.lora_alpha,
+                "batch_size": config.batch_size,
+                "episodes": config.max_steps,
+            }
+            metric_dict = {
+                "hparam/avg_reward": sum(m.total_reward for m in last_n) / len(last_n),
+                "hparam/avg_r1": sum(m.r1 for m in last_n) / len(last_n),
+                "hparam/avg_mttr": sum(m.mttr for m in last_n) / len(last_n),
+                "hparam/best_reward": max(m.total_reward for m in all_metrics),
+            }
+            tb_writer.add_hparams(hparam_dict, metric_dict)
+        tb_writer.close()
+        logger.info("TensorBoard experiment tracking — run complete, writer closed.")
 
     return all_metrics
 

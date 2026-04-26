@@ -107,6 +107,35 @@ Committed plots required for validation are present in [`results/`](results/), i
 ![Oracle Training](results/oracle_training_curves.png)
 ![Oracle Loss](results/oracle_loss_curve.png)
 
+## Experiment Tracking
+
+Experiment tracking is enabled by default via **TensorBoard**. Every training run logs:
+
+- **Per-episode scalars**: R1 (root cause), R2 (MTTR), R3 (recovery), R4 (blast radius), total reward, MTTR, loss
+- **Hyperparameters**: agent role, model name, LoRA rank/alpha, batch size, episode count
+- **Final summary**: hparam table with average and best metrics
+
+TensorBoard event files are committed in [`results/runs/`](results/runs/).
+
+To view locally:
+
+```bash
+pip install tensorboard
+tensorboard --logdir results/runs/
+```
+
+The training pipeline (`sentinel/training/pipeline.py`) sets `experiment_tracking=True` by default in `TrainingConfig`. To disable, pass `experiment_tracking=False`.
+
+### Latest Training Results (5 agents × 100 episodes, NVIDIA L40S)
+
+| Agent | Avg Reward (last 10) | Best Reward | R1 (root cause) | Time |
+|-------|---------------------|-------------|-----------------|------|
+| Holmes | 0.771 | 0.899 | 0.75 | 709s |
+| Forge | 0.760 | 0.849 | 0.40 | 634s |
+| Argus | 0.743 | 0.899 | 0.65 | 707s |
+| Hermes | 0.497 | 0.512 | 0.00 | 621s |
+| Oracle | 0.366 | 0.404 | 0.00 | 166s |
+
 ## Training
 
 Quick start:

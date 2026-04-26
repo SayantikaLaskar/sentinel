@@ -295,8 +295,35 @@ class Sentinel_Env(gymnasium.Env):
             self._propagate_secondary_failures()
 
         # 7. Check termination
+        # FormHypothesis ends episode for investigative agents (Holmes/Argus)
+        hypothesis_terminates = (
+            parsed_action.name == "FormHypothesis"
+            and parsed_action.agent in ("holmes", "argus")
+        )
+        # Blast radius reaching 0 ends episode for remediation agents (Forge)
+        blast_resolved = (
+            incident_state is not None
+            and parsed_action.category == "remediation"
+            and len(incident_state.current_blast_radius) == 0
+        )
+        # Deployment success ends episode for Hermes (FullDeploy/Rollback on root cause)
+        deploy_resolved = (
+            parsed_action.agent == "hermes"
+            and parsed_action.name in ("FullDeploy", "Rollback")
+            and incident_state is not None
+            and len(incident_state.current_blast_radius) == 0
+        )
+        # EscalateToHuman ends episode for Oracle
+        oracle_escalated = (
+            parsed_action.agent == "oracle"
+            and parsed_action.name == "EscalateToHuman"
+        )
         terminated = (
             parsed_action.name == "CloseIncident"
+            or hypothesis_terminates
+            or blast_resolved
+            or deploy_resolved
+            or oracle_escalated
             or self.step_count >= self._max_steps
         )
         truncated = False
@@ -304,7 +331,12 @@ class Sentinel_Env(gymnasium.Env):
         if terminated:
             self._needs_reset = True
             if incident_state is not None:
-                incident_state.resolved = parsed_action.name == "CloseIncident"
+                incident_state.resolved = (
+                    parsed_action.name == "CloseIncident"
+                    or hypothesis_terminates
+                    or blast_resolved
+                    or deploy_resolved
+                )
 
         # 8. Build observation
         obs = self._build_obs()
@@ -322,7 +354,12 @@ class Sentinel_Env(gymnasium.Env):
             info["identified_failure_type"] = identified_failure_type
         if terminated:
             info["terminated_reason"] = (
-                "CloseIncident" if parsed_action.name == "CloseIncident" else "max_steps"
+                "CloseIncident" if parsed_action.name == "CloseIncident"
+                else "FormHypothesis" if hypothesis_terminates
+                else "blast_resolved" if blast_resolved
+                else "deploy_resolved" if deploy_resolved
+                else "oracle_escalated" if oracle_escalated
+                else "max_steps"
             )
 
         return obs, float(reward), terminated, truncated, info
@@ -458,12 +495,25 @@ class Sentinel_Env(gymnasium.Env):
             service = params.get("service", "")
             failure_type = params.get("failure_type", "")
             confidence = params.get("confidence", 0.5)
+            # Robust float conversion — LLM may output "high", "0.9", etc.
+            try:
+                confidence = float(confidence)
+            except (ValueError, TypeError):
+                confidence_map = {"high": 0.9, "medium": 0.6, "low": 0.3}
+                confidence = confidence_map.get(str(confidence).lower(), 0.5)
             if service and incident_state is not None:
                 from sentinel.models import HypothesisNode, FailureType, TimelineEntry
+                # Normalize failure_type — LLM may generate variants
+                ft_str = failure_type.lower().replace("-", "_").replace(" ", "_")
                 try:
-                    ft = FailureType(failure_type)
+                    ft = FailureType(ft_str)
                 except ValueError:
+                    # Try partial match
                     ft = FailureType.cpu_spike
+                    for member in FailureType:
+                        if member.value in ft_str or ft_str in member.value:
+                            ft = member
+                            break
                 node = HypothesisNode(
                     service=service, failure_type=ft, confidence=float(confidence)
                 )

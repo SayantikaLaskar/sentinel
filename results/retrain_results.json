@@ -1,0 +1,162 @@
+{
+  "project": "SENTINEL",
+  "hackathon": "Meta PyTorch OpenEnv Hackathon 2026",
+  "model": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+  "gpu": "NVIDIA L40S (48GB)",
+  "episodes_per_agent": 100,
+  "fixes_applied": [
+    "FormHypothesis terminates Holmes episodes (variable MTTR)",
+    "Blast radius=0 terminates Forge episodes (variable MTTR)",
+    "Advantage-weighted REINFORCE gradient steps (proper credit assignment)",
+    "Explicit prompts guide Holmes to FormHypothesis after investigation",
+    "R2 MTTR penalized when R1=0 (no root cause identified)",
+    "Forge gets partial R1 credit from remediation target inference"
+  ],
+  "agents": {
+    "holmes": {
+      "agent": "holmes",
+      "tag": "full",
+      "episodes": 100,
+      "elapsed_s": 455.5,
+      "sec_per_ep": 4.6,
+      "avg_reward_last10": 0.74,
+      "avg_r1_last10": 0.65,
+      "avg_mttr_last10": 1.0,
+      "best_reward": 0.9158,
+      "best_r1": 1.0,
+      "eval": {
+        "easy": {
+          "r1_mean": 0.6667,
+          "total_mean": 0.738,
+          "mttr_mean": 1.0
+        },
+        "medium": {
+          "r1_mean": 0.5,
+          "total_mean": 0.6991,
+          "mttr_mean": 1.0
+        },
+        "hard": {
+          "r1_mean": 0.5,
+          "total_mean": 0.634,
+          "mttr_mean": 1.0
+        }
+      }
+    },
+    "forge": {
+      "agent": "forge",
+      "tag": "full",
+      "episodes": 100,
+      "elapsed_s": 593.6,
+      "sec_per_ep": 5.9,
+      "avg_reward_last10": 0.596,
+      "avg_r1_last10": 0.15,
+      "avg_mttr_last10": 5.8,
+      "best_reward": 0.8491,
+      "best_r1": 0.5,
+      "eval": {
+        "easy": {
+          "r1_mean": 0.5,
+          "total_mean": 0.8197,
+          "mttr_mean": 6.7
+        },
+        "medium": {
+          "r1_mean": 0.3333,
+          "total_mean": 0.7173,
+          "mttr_mean": 5.3
+        },
+        "hard": {
+          "r1_mean": 0.1667,
+          "total_mean": 0.6086,
+          "mttr_mean": 5.0
+        }
+      }
+    },
+    "argus": {
+      "agent": "argus",
+      "tag": "full",
+      "episodes": 100,
+      "elapsed_s": 713.2,
+      "sec_per_ep": 7.1,
+      "avg_reward_last10": 0.7686,
+      "avg_r1_last10": 0.75,
+      "avg_mttr_last10": 4.0,
+      "best_reward": 0.8994,
+      "best_r1": 1.0,
+      "eval": {
+        "easy": {
+          "r1_mean": 0.0,
+          "total_mean": 0.3289,
+          "mttr_mean": 4.0
+        },
+        "medium": {
+          "r1_mean": 0.5,
+          "total_mean": 0.6828,
+          "mttr_mean": 4.0
+        },
+        "hard": {
+          "r1_mean": 0.5,
+          "total_mean": 0.6287,
+          "mttr_mean": 4.0
+        }
+      }
+    },
+    "hermes": {
+      "agent": "hermes",
+      "tag": "full",
+      "episodes": 100,
+      "elapsed_s": 657.3,
+      "sec_per_ep": 6.6,
+      "avg_reward_last10": 0.4997,
+      "avg_r1_last10": 0.0,
+      "avg_mttr_last10": 5.9,
+      "best_reward": 0.8092,
+      "best_r1": 0.5,
+      "eval": {
+        "easy": {
+          "r1_mean": 0.0,
+          "total_mean": 0.4936,
+          "mttr_mean": 8.3
+        },
+        "medium": {
+          "r1_mean": 0.0,
+          "total_mean": 0.4989,
+          "mttr_mean": 6.0
+        },
+        "hard": {
+          "r1_mean": 0.0,
+          "total_mean": 0.5093,
+          "mttr_mean": 2.0
+        }
+      }
+    },
+    "oracle": {
+      "agent": "oracle",
+      "tag": "full",
+      "episodes": 100,
+      "elapsed_s": 170.9,
+      "sec_per_ep": 1.7,
+      "avg_reward_last10": 0.3662,
+      "avg_r1_last10": 0.0,
+      "avg_mttr_last10": 1.0,
+      "best_reward": 0.4037,
+      "best_r1": 0.0,
+      "eval": {
+        "easy": {
+          "r1_mean": 0.0,
+          "total_mean": 0.3426,
+          "mttr_mean": 1.0
+        },
+        "medium": {
+          "r1_mean": 0.0,
+          "total_mean": 0.3621,
+          "mttr_mean": 1.0
+        },
+        "hard": {
+          "r1_mean": 0.0,
+          "total_mean": 0.3648,
+          "mttr_mean": 1.0
+        }
+      }
+    }
+  }
+}

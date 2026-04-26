@@ -1,62 +1,18 @@
 # Training Guide
 
-This repo is ready for **LLM-only** GRPO training. The local workspace is CPU-only, so real runs should happen on a hosted CUDA GPU such as Modal.
+This repo is ready for **LLM-only** GRPO training. Real runs require a CUDA GPU (Google Colab T4 minimum, A100/L40S recommended).
 
-## Recommended Hosted Setup
+## Recommended Setup
 
 Use:
-- `A100-80GB`
+- `A100-80GB` or `L40S-48GB`
 - `Qwen/Qwen2.5-7B-Instruct`
 - `--no-4bit`
 
 That is the safest path for this codebase right now. It avoids the bitsandbytes CUDA-runtime mismatch that can show up with 4-bit hosted runs.
 
-## Modal Setup
-
-```bash
-pip install modal
-modal setup
-```
-
-If you want a judge-friendly rerunnable notebook, use:
+For a judge-friendly rerunnable notebook, use:
 - `sentinel_colab_training.ipynb`
-
-## Modal Smoke Test
-
-Run this first to verify the GPU container is healthy:
-
-```bash
-modal run modal_train.py::gpu_sanity
-```
-
-## Modal Training
-
-Train the core two agents first:
-
-```bash
-modal run modal_train.py::train --agent holmes --episodes 300 --batch-size 2
-modal run modal_train.py::train --agent forge --episodes 300 --batch-size 2
-```
-
-Then train the supporting agents if you have budget:
-
-```bash
-modal run modal_train.py::train --agent hermes --episodes 200 --batch-size 2
-modal run modal_train.py::train --agent oracle --episodes 200 --batch-size 2
-modal run modal_train.py::train --agent argus --episodes 200 --batch-size 2
-```
-
-Evaluate:
-
-```bash
-modal run modal_train.py::evaluate --agent holmes --eval-episodes 20
-modal run modal_train.py::evaluate --agent forge --eval-episodes 20
-modal run modal_train.py::evaluate --agent hermes --eval-episodes 20
-modal run modal_train.py::evaluate --agent oracle --eval-episodes 20
-modal run modal_train.py::evaluate --agent argus --eval-episodes 20
-```
-
-Checkpoints and logs are written to the Modal Volume `sentinel-checkpoints`.
 
 ## Agent Priority
 

@@ -10,7 +10,7 @@ from sentinel.training.prompt_builder import build_messages, build_prompt
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GEN_KWARGS: dict[str, Any] = {
-    "max_new_tokens": 96,
+    "max_new_tokens": 128,
     "temperature": 0.7,
     "top_p": 0.95,
     "do_sample": True,

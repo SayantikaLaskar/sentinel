@@ -45,3 +45,5 @@ training_log.jsonl
 # Temp scripts
 run_simulation.py
 plot_results.py
+unsloth_compiled_cache/
+unsloth_compiled_cache/

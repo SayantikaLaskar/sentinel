@@ -49,6 +49,7 @@ def _run_single_eval_episode(
     while not (terminated or truncated):
         action_dict = dict(llm_agent.act(obs, step=step_count))
         action_dict.pop("_llm_completion", None)
+        action_dict.pop("_parse_failed", None)
         obs_next, reward, terminated, truncated, step_info = env.step(action_dict)
 
         try:

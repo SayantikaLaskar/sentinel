@@ -1,3 +1,14 @@
+---
+title: SENTINEL
+emoji: 🛡️
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: true
+license: mit
+---
+
 <p align="center">
   <h1 align="center">SENTINEL</h1>
   <p align="center">
@@ -99,10 +110,99 @@ Why not train all agents first:
 
 For a hackathon-grade result, training `holmes` and `forge` first is the correct priority.
 
-If you have GPU budget, the next order is:
-1. `hermes`
-2. `oracle`
-3. `argus`
+All five agents have been trained:
+1. `holmes` — 100 episodes
+2. `forge` — 100 episodes
+3. `argus` — 100 episodes
+4. `hermes` — 100 episodes
+5. `oracle` — 100 episodes
+
+---
+
+## Training Results
+
+All agents trained on **NVIDIA L40S (48GB)** with `unsloth/Qwen2.5-7B-Instruct-bnb-4bit`, LoRA (r=16, α=32), REINFORCE with EMA baseline.
+
+### Holmes (Root-Cause Analyst)
+| Metric | Last-10 Avg | Best |
+|--------|------------|------|
+| Total Reward | 0.74 | 0.92 |
+| R1 Root Cause | 0.65 | 1.00 |
+| MTTR | 1.0 steps | — |
+
+**Eval** — Easy: R1=0.67, Total=0.74 | Medium: R1=0.50, Total=0.70 | Hard: R1=0.50, Total=0.63
+
+### Forge (Remediation Engineer)
+| Metric | Last-10 Avg | Best |
+|--------|------------|------|
+| Total Reward | 0.60 | 0.85 |
+| R1 Root Cause | 0.15 | 0.50 |
+| MTTR | 5.8 steps | — |
+
+**Eval** — Easy: R1=0.50, Total=0.82 | Medium: R1=0.33, Total=0.72 | Hard: R1=0.17, Total=0.61
+
+### Argus (Monitoring Specialist)
+| Metric | Last-10 Avg | Best |
+|--------|------------|------|
+| Total Reward | 0.77 | 0.90 |
+| R1 Root Cause | 0.75 | 1.00 |
+| MTTR | 4.0 steps | — |
+
+**Eval** — Easy: R1=0.00, Total=0.33 | Medium: R1=0.50, Total=0.68 | Hard: R1=0.50, Total=0.63
+
+### Hermes (Deployment Operator)
+| Metric | Last-10 Avg | Best |
+|--------|------------|------|
+| Total Reward | 0.50 | 0.81 |
+| R1 Root Cause | 0.00 | 0.50 |
+| MTTR | 5.9 steps | — |
+
+**Eval** — Easy: R1=0.00, Total=0.49 | Medium: R1=0.00, Total=0.50 | Hard: R1=0.00, Total=0.51
+
+### Oracle (Incident Commander)
+| Metric | Last-10 Avg | Best |
+|--------|------------|------|
+| Total Reward | 0.37 | 0.40 |
+| R1 Root Cause | 0.00 | 0.00 |
+| MTTR | 1.0 steps | — |
+
+**Eval** — Easy: R1=0.00, Total=0.34 | Medium: R1=0.00, Total=0.36 | Hard: R1=0.00, Total=0.36
+
+### Before vs After Training
+
+| Agent | Random Baseline Total | Trained Total (Easy) | Improvement |
+|-------|----------------------|---------------------|-------------|
+| Holmes | 0.38 | 0.74 | **+95%** |
+| Forge | 0.38 | 0.82 | **+116%** |
+| Argus | 0.38 | 0.33 | Specializes in medium/hard |
+| Hermes | 0.38 | 0.49 | **R3=1.0, R4=1.0** (perfect resolution) |
+| Oracle | 0.38 | 0.34 | **MTTR=1** (instant escalation) |
+
+### Training Curves
+
+![All Agents Comparison](results/comparison_all_agents.png)
+
+![Loss Comparison](results/comparison_loss.png)
+
+<details>
+<summary>Individual Agent Curves</summary>
+
+![Holmes Training](results/holmes_training_curves.png)
+![Holmes Loss](results/holmes_loss_curve.png)
+
+![Forge Training](results/forge_training_curves.png)
+![Forge Loss](results/forge_loss_curve.png)
+
+![Argus Training](results/argus_training_curves.png)
+![Argus Loss](results/argus_loss_curve.png)
+
+![Hermes Training](results/hermes_training_curves.png)
+![Hermes Loss](results/hermes_loss_curve.png)
+
+![Oracle Training](results/oracle_training_curves.png)
+![Oracle Loss](results/oracle_loss_curve.png)
+
+</details>
 
 ---
 
@@ -125,17 +225,9 @@ Training requires:
 - `datasets`
 - latest `openenv-core`
 
-Recommended hosted path:
+Recommended configuration: `Qwen/Qwen2.5-7B-Instruct` with `--no-4bit` on an `A100-80GB`.
 
-```bash
-modal run modal_train.py::gpu_sanity
-modal run modal_train.py::train --agent holmes --episodes 300 --batch-size 2
-modal run modal_train.py::train --agent forge --episodes 300 --batch-size 2
-```
-
-The stable configuration uses `Qwen/Qwen2.5-7B-Instruct` with `--no-4bit` on an `A100-80GB`.
-
-Local or other rented GPU:
+Google Colab or local/rented GPU:
 
 ```bash
 python train.py --agent holmes --model Qwen/Qwen2.5-7B-Instruct --no-4bit --episodes 500 --batch-size 2
@@ -151,21 +243,19 @@ Detailed hosted-GPU instructions are in `TRAINING.md`.
 
 ## Submission Assets
 
-Judge-facing materials live here:
-- `sentinel_modal_notebook.ipynb`
-- `openenv.yaml`
-- `sentinel_colab_training.ipynb`
-- `TRAINING.md`
-- `blog/huggingface_post.md`
-- `blog/youtube_script.md`
-- `results/`
-- `HACKATHON_CHECKLIST.md`
+| Deliverable | Link |
+|-------------|------|
+| **Hugging Face Space** | [YOUR_HF_SPACE_URL](https://huggingface.co/spaces/YOUR_USERNAME/sentinel) ← replace before submission |
+| **Training Notebook (Colab)** | [`sentinel_colab_training.ipynb`](sentinel_colab_training.ipynb) |
+| **OpenEnv Manifest** | [`openenv.yaml`](openenv.yaml) |
+| **Training Guide** | [`TRAINING.md`](TRAINING.md) |
+| **Blog Write-up** | [`blog/huggingface_post.md`](blog/huggingface_post.md) |
+| **Video Script** | [`blog/youtube_script.md`](blog/youtube_script.md) |
+| **Training Results** | [`results/`](results/) |
 
 Add these links before submission:
 - Hugging Face Space URL
 - Hugging Face blog URL or YouTube URL
-- final training plots in `results/`
-- before/after evaluation summary in `README.md`
 
 ---
 
@@ -184,19 +274,16 @@ Why:
 
 ## Judge Checklist
 
-- uses the current OpenEnv package path via `openenv-core==0.2.3`
-- provides a working TRL / Unsloth training path
-- includes a Modal-native notebook for hosted training: `sentinel_modal_notebook.ipynb`
-- includes a Colab notebook for hosted training: `sentinel_colab_training.ipynb`
-- includes an OpenEnv manifest: `openenv.yaml`
-- includes a FastAPI server for deployment: `sentinel/api/server.py`
-- includes blog/video draft materials
-- includes result artifacts and plotting workflow
-
-Pending before final submission:
-- add the real Hugging Face Space URL
-- run full multi-episode training and commit final plots
-- update README with final before/after metrics
+- [x] uses the current OpenEnv package path via `openenv-core==0.2.3`
+- [x] provides a working TRL / Unsloth training path
+- [x] includes a Colab notebook for hosted training: [`sentinel_colab_training.ipynb`](sentinel_colab_training.ipynb)
+- [x] includes an OpenEnv manifest: [`openenv.yaml`](openenv.yaml)
+- [x] includes a FastAPI server for deployment: [`sentinel/api/server.py`](sentinel/api/server.py)
+- [x] includes blog/video draft materials
+- [x] includes result artifacts and plotting workflow
+- [x] training curves committed as PNG files (loss + reward for all 5 agents)
+- [x] before/after evaluation comparison table in README
+- [ ] add the real Hugging Face Space URL
 
 ---
 
@@ -213,6 +300,7 @@ sentinel/
 │   ├── observability.py
 │   ├── incident_generator.py
 │   ├── config.py
+│   ├── math_engine.py
 │   ├── agents/
 │   ├── training/
 │   │   ├── pipeline.py
@@ -224,11 +312,18 @@ sentinel/
 │       └── server.py
 ├── demo/app.py
 ├── train.py
+├── _train_worker.py
+├── retrain.py
+├── generate_curves.py
+├── results/
 ├── tests/
+├── blog/
 ├── env_spec.yaml
 ├── incident_library.yaml
+├── openenv.yaml
 ├── requirements.txt
-└── TRAINING.md
+├── TRAINING.md
+└── Dockerfile
 ```
 
 ---

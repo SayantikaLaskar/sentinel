@@ -1,0 +1,29 @@
+{
+  "agent": "hermes",
+  "tag": "full",
+  "episodes": 100,
+  "elapsed_s": 657.3,
+  "sec_per_ep": 6.6,
+  "avg_reward_last10": 0.4997,
+  "avg_r1_last10": 0.0,
+  "avg_mttr_last10": 5.9,
+  "best_reward": 0.8092,
+  "best_r1": 0.5,
+  "eval": {
+    "easy": {
+      "r1_mean": 0.0,
+      "total_mean": 0.4936,
+      "mttr_mean": 8.3
+    },
+    "medium": {
+      "r1_mean": 0.0,
+      "total_mean": 0.4989,
+      "mttr_mean": 6.0
+    },
+    "hard": {
+      "r1_mean": 0.0,
+      "total_mean": 0.5093,
+      "mttr_mean": 2.0
+    }
+  }
+}

@@ -101,9 +101,9 @@ reward:
 # Training algorithm
 # -----------------------------------------------------------
 training:
-  algorithm: GRPO
-  base_model: "Qwen/Qwen2.5-7B-Instruct"
-  quantization: bf16_or_fp16
+  algorithm: REINFORCE_EMA
+  base_model: "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+  quantization: 4bit_bnb
   lora:
     r: 16
     alpha: 32
@@ -117,8 +117,8 @@ training:
       - down_proj
   batch_size: 2
   max_steps: 1000
-  hosted_gpu: "A100-80GB"
-  note: "Stable training path uses Qwen2.5-7B-Instruct with --no-4bit on hosted GPU."
+  hosted_gpu: "NVIDIA L40S (48GB)"
+  note: "Training uses REINFORCE with EMA baseline on Qwen2.5-7B-Instruct-bnb-4bit. All 5 agents trained for 100 episodes each."
 
 # -----------------------------------------------------------
 # Scenario library
@@ -174,4 +174,4 @@ submission:
   blog_post: "blog/huggingface_post.md"
   video_script: "blog/youtube_script.md"
   results_dir: "results/"
-  docker: "docker-compose up"
+  docker: "docker build -t sentinel . && docker run -p 7860:7860 sentinel"

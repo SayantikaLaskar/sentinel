@@ -1,0 +1,29 @@
+{
+  "agent": "argus",
+  "tag": "full",
+  "episodes": 100,
+  "elapsed_s": 713.2,
+  "sec_per_ep": 7.1,
+  "avg_reward_last10": 0.7686,
+  "avg_r1_last10": 0.75,
+  "avg_mttr_last10": 4.0,
+  "best_reward": 0.8994,
+  "best_r1": 1.0,
+  "eval": {
+    "easy": {
+      "r1_mean": 0.0,
+      "total_mean": 0.3289,
+      "mttr_mean": 4.0
+    },
+    "medium": {
+      "r1_mean": 0.5,
+      "total_mean": 0.6828,
+      "mttr_mean": 4.0
+    },
+    "hard": {
+      "r1_mean": 0.5,
+      "total_mean": 0.6287,
+      "mttr_mean": 4.0
+    }
+  }
+}

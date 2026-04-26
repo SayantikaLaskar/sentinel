@@ -161,7 +161,7 @@ class Reward_Function:
         r1 = self._r1_root_cause_accuracy(
             incident_state, identified_root_cause, identified_failure_type
         )
-        r2 = self._r2_mttr(trajectory.mttr)
+        r2 = self._r2_mttr(trajectory.mttr, r1)
         r3 = self._r3_recovery_quality(world_state)
         r4 = self._r4_blast_radius(incident_state)
 
@@ -212,16 +212,22 @@ class Reward_Function:
             return 0.5
         return 0.0
 
-    def _r2_mttr(self, mttr_steps: int) -> float:
+    def _r2_mttr(self, mttr_steps: int, r1: float = 0.0) -> float:
         """Return an MTTR score inversely proportional to resolution time.
 
         Score = 1.0 / (1.0 + mttr_steps / sla_breach_threshold)
         +0.1 bonus if mttr_steps < sla_breach_threshold (pre-SLA resolution)
         Clamped to [0.0, 1.1].
+
+        If r1 == 0 (no root cause identified), MTTR score is halved
+        to discourage episodes that run to max_steps without diagnosis.
         """
         base = 1.0 / (1.0 + mttr_steps / self.sla_breach_threshold)
         bonus = 0.1 if mttr_steps < self.sla_breach_threshold else 0.0
-        return max(0.0, min(1.1, base + bonus))
+        score = max(0.0, min(1.1, base + bonus))
+        if r1 == 0.0:
+            score *= 0.5  # Penalize MTTR when root cause not identified
+        return score
 
     def _r3_recovery_quality(self, world_state: NexaStackWorldState) -> float:
         """Return the fraction of services whose metrics are within 5% of baseline.
@@ -291,5 +297,17 @@ class Reward_Function:
                     step.action.params.get("service", ""),
                     step.action.params.get("failure_type", ""),
                 )
+
+        # For remediation agents (Forge): infer root cause from which service
+        # was remediated most — gives Forge partial R1 credit
+        remediation_targets: dict[str, int] = {}
+        for step in trajectory.steps:
+            if step.action.category == "remediation":
+                svc = step.action.params.get("service", "")
+                if svc:
+                    remediation_targets[svc] = remediation_targets.get(svc, 0) + 1
+        if remediation_targets:
+            most_remediated = max(remediation_targets, key=remediation_targets.get)
+            return most_remediated, ""
 
         return "", ""

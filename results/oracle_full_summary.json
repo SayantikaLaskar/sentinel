@@ -1,0 +1,29 @@
+{
+  "agent": "oracle",
+  "tag": "full",
+  "episodes": 100,
+  "elapsed_s": 170.9,
+  "sec_per_ep": 1.7,
+  "avg_reward_last10": 0.3662,
+  "avg_r1_last10": 0.0,
+  "avg_mttr_last10": 1.0,
+  "best_reward": 0.4037,
+  "best_r1": 0.0,
+  "eval": {
+    "easy": {
+      "r1_mean": 0.0,
+      "total_mean": 0.3426,
+      "mttr_mean": 1.0
+    },
+    "medium": {
+      "r1_mean": 0.0,
+      "total_mean": 0.3621,
+      "mttr_mean": 1.0
+    },
+    "hard": {
+      "r1_mean": 0.0,
+      "total_mean": 0.3648,
+      "mttr_mean": 1.0
+    }
+  }
+}

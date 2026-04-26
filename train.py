@@ -12,6 +12,9 @@ from pathlib import Path
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
+import os
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

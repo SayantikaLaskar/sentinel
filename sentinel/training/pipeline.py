@@ -139,63 +139,26 @@ def build_grpo_trainer(
         random_state=42,
     )
 
-    # ── 3. GRPO reward function ────────────────────────────────────────────
-    # GRPOTrainer expects: reward_fn(prompts, completions, **kwargs) -> list[float]
-    grpo_reward_fn = make_grpo_reward_fn(env)
+    # ── 3. Create optimizer for reward-weighted gradient steps ─────────────
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=5e-6, weight_decay=0.01)
+    logger.info("Optimizer: AdamW over %d trainable params", len(trainable_params))
 
-    # ── 4. Build a minimal prompt dataset for GRPOTrainer ─────────────────
-    # TRL's GRPOTrainer needs a dataset of prompts to sample from.
-    # We generate synthetic prompts from a fresh env reset.
-    try:
-        from datasets import Dataset  # type: ignore
-        env_obs, _ = env.reset()
-        sample_messages = build_messages(env_obs, agent_role=agent, step_number=0)
-        sample_prompt = tokenizer.apply_chat_template(
-            sample_messages, tokenize=False, add_generation_prompt=True
-        )
-        # Create a small dataset; the real training data comes from env rollouts
-        prompt_dataset = Dataset.from_dict({"prompt": [sample_prompt] * 8})
-    except Exception as exc:
-        logger.warning("Could not build prompt dataset: %s", exc)
-        prompt_dataset = None
-
-    # ── 5. GRPOTrainer config ─────────────────────────────────────────────
-    grpo_cfg = GRPOConfig(
-        output_dir=config.checkpoint_dir,
-        per_device_train_batch_size=config.batch_size,
-        max_steps=config.max_steps,
-        num_generations=4,
-        max_completion_length=config.max_completion_length,
-        temperature=0.7,
-        top_p=1.0,
-        learning_rate=5e-6,
-        lr_scheduler_type="cosine",
-        warmup_steps=10,
-        logging_steps=5,
-        save_steps=50,
-        bf16=True,
-        remove_unused_columns=False,
-    )
-
-    trainer = GRPOTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        reward_funcs=[grpo_reward_fn],
-        args=grpo_cfg,
-        train_dataset=prompt_dataset,
-    )
-
-    # ── 6. LLMAgent for action generation during rollouts ─────────────────
+    # ── 4. LLMAgent for action generation during rollouts ─────────────────
     device = "cuda"
+    FastLanguageModel.for_inference(model)
     llm_agent = LLMAgent(
         model=model,
         tokenizer=tokenizer,
         agent_role=agent,
         device=device,
     )
+    # Attach optimizer to llm_agent so training loop can access it
+    llm_agent.optimizer = optimizer
     logger.info("build_grpo_trainer: ready (model=%s, device=%s)", config.model_name, device)
 
-    return trainer, llm_agent
+    # Return (None, llm_agent) — trainer is no longer used
+    return None, llm_agent
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +261,14 @@ def run_training_loop(
     )
 
     for episode in range(start_episode, config.max_steps):
+        # Clear CUDA cache between episodes to prevent memory fragmentation
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
         metrics = _run_single_episode(
             episode=episode,
             trainer=trainer,
@@ -342,7 +313,8 @@ def _run_single_episode(
                 episode, trainer, env, config, reward_fn, llm_agent=llm_agent
             )
         except RuntimeError as exc:
-            if "CUDA out of memory" in str(exc):
+            err_msg = str(exc)
+            if "CUDA out of memory" in err_msg:
                 new_bs = max(1, config.batch_size // 2)
                 logger.warning(
                     "CUDA OOM at episode %d \u2014 halving batch_size %d\u2192%d and retrying.",
@@ -351,6 +323,18 @@ def _run_single_episode(
                 config.batch_size = new_bs
                 if trainer is not None and hasattr(trainer, "args"):
                     trainer.args.per_device_train_batch_size = new_bs
+            elif "device-side assert" in err_msg or "cudaErrorAssert" in err_msg:
+                import torch
+                logger.warning(
+                    "CUDA assert at episode %d \u2014 resetting CUDA state and retrying.",
+                    episode,
+                )
+                torch.cuda.empty_cache()
+                # Return degraded metrics instead of crashing
+                return EpisodeMetrics(
+                    episode=episode, r1=0.0, r2=0.0, r3=0.0, r4=0.0,
+                    total_reward=0.0, mttr=0, loss=None,
+                )
             else:
                 raise
 
@@ -442,9 +426,11 @@ def _execute_episode(
             parse_failures = sum(1 for sample in grpo_samples if sample.get("parse_failed"))
             failure_rate = parse_failures / max(len(grpo_samples), 1)
             if failure_rate >= config.parser_failure_abort_rate:
-                raise RuntimeError(
-                    f"Parser failure rate too high ({failure_rate:.2f}) at episode {episode}; aborting early to avoid wasting GPU."
+                logger.warning(
+                    "Parser failure rate too high (%.2f) at episode %d step %d; ending episode early.",
+                    failure_rate, episode, step_count,
                 )
+                break
 
     # ─ Build trajectory ─────────────────────────────────────────────────
     episode_id = info.get("incident_id", str(uuid.uuid4()))
@@ -469,21 +455,88 @@ def _execute_episode(
         else:
             breakdown = RewardBreakdown(r1=0.0, r2=0.0, r3=0.0, r4=0.0, penalties=0.0, total=0.0)
 
-    # ─ GRPO gradient step (if trainer + samples available) ────────────────
+    # ─ Reward-weighted gradient step (replaces GRPOTrainer.train()) ──────
     loss: float | None = None
-    if trainer is not None and grpo_samples:
+    # Only do gradient step if we have enough valid (non-failed) samples
+    valid_samples = [s for s in grpo_samples if not s.get("parse_failed")]
+    episode_reward = breakdown.total  # Use episode-level reward for gradient weighting
+
+    if hasattr(llm_agent, 'optimizer') and len(valid_samples) >= 1:
         try:
-            from datasets import Dataset  # type: ignore
-            grpo_ds = Dataset.from_list([{
-                "prompt":     s["prompt"],
-                "completion": s["completion"],
-            } for s in grpo_samples])
-            trainer.train_dataset = grpo_ds
-            result = trainer.train()
-            if hasattr(result, "training_loss"):
-                loss = float(result.training_loss)
+            import torch
+            # Verify CUDA is still healthy before attempting training
+            if torch.cuda.is_available():
+                torch.cuda.current_device()  # will raise if CUDA state is bad
+
+            model = llm_agent.model
+            tokenizer = llm_agent.tokenizer
+            optimizer = llm_agent.optimizer
+
+            # Running baseline: exponential moving average of episode rewards
+            if not hasattr(llm_agent, '_reward_baseline'):
+                llm_agent._reward_baseline = episode_reward
+            baseline = llm_agent._reward_baseline
+            advantage = episode_reward - baseline
+            # Update baseline with EMA (alpha=0.1)
+            llm_agent._reward_baseline = 0.9 * baseline + 0.1 * episode_reward
+
+            # Only do gradient step if advantage is meaningfully non-zero
+            if abs(advantage) > 0.01:
+                FastLanguageModel.for_training(model)
+                optimizer.zero_grad()
+
+                total_loss = 0.0
+                n = min(len(valid_samples), config.batch_size)
+                samples_batch = valid_samples[:n]
+
+                # Clamp advantage to prevent extreme updates
+                advantage = max(-2.0, min(2.0, advantage))
+
+                for sample in samples_batch:
+                    full_text = sample["prompt"] + sample["completion"]
+                    enc = tokenizer(
+                        full_text, return_tensors="pt",
+                        truncation=True, max_length=config.max_seq_length,
+                    ).to("cuda")
+
+                    # Mask prompt tokens with -100 so loss is only on completion
+                    prompt_enc = tokenizer(
+                        sample["prompt"], return_tensors="pt",
+                        truncation=True, max_length=config.max_seq_length,
+                    )
+                    prompt_len = prompt_enc["input_ids"].shape[1]
+                    labels = enc["input_ids"].clone()
+                    labels[:, :prompt_len] = -100
+
+                    outputs = model(
+                        input_ids=enc["input_ids"],
+                        attention_mask=enc["attention_mask"],
+                        labels=labels,
+                    )
+
+                    step_loss = outputs.loss * advantage / n
+                    step_loss.backward()
+                    total_loss += step_loss.item()
+
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+                loss = total_loss
+
+                FastLanguageModel.for_inference(model)
+
         except Exception as exc:
-            logger.warning("GRPO trainer step failed at episode %d: %s", episode, exc)
+            logger.warning("Training step failed at episode %d: %s", episode, exc)
+            # Clear CUDA state to prevent cascading failures
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            try:
+                FastLanguageModel.for_inference(llm_agent.model)
+            except Exception:
+                pass
 
     return EpisodeMetrics(
         episode=episode,

@@ -21,7 +21,7 @@ observability:
   alert_threshold_multiplier: 1.5
 
 training:
-  max_steps_per_episode: 200
+  max_steps_per_episode: 50
   sla_breach_threshold_steps: 50
   placeholder_action:
     agent: holmes

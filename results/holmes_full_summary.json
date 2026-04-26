@@ -1,0 +1,29 @@
+{
+  "agent": "holmes",
+  "tag": "full",
+  "episodes": 100,
+  "elapsed_s": 455.5,
+  "sec_per_ep": 4.6,
+  "avg_reward_last10": 0.74,
+  "avg_r1_last10": 0.65,
+  "avg_mttr_last10": 1.0,
+  "best_reward": 0.9158,
+  "best_r1": 1.0,
+  "eval": {
+    "easy": {
+      "r1_mean": 0.6667,
+      "total_mean": 0.738,
+      "mttr_mean": 1.0
+    },
+    "medium": {
+      "r1_mean": 0.5,
+      "total_mean": 0.6991,
+      "mttr_mean": 1.0
+    },
+    "hard": {
+      "r1_mean": 0.5,
+      "total_mean": 0.634,
+      "mttr_mean": 1.0
+    }
+  }
+}

@@ -41,7 +41,7 @@ Why `holmes` and `forge` first:
 Install:
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/sayantikalaskar/sentinel.git
 cd sentinel
 python -m venv .venv
 source .venv/bin/activate

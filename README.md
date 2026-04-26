@@ -10,9 +10,12 @@ license: mit
 ---
 
 <p align="center">
-  <h1 align="center">SENTINEL</h1>
+  <h1 align="center">🛡️ SENTINEL</h1>
   <p align="center">
     <strong>LLM-First Incident Response Environment for Autonomous Cloud Operations</strong>
+  </p>
+  <p align="center">
+    <em>Training AI agents to diagnose and fix production outages faster than human engineers</em>
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/OpenEnv-Hackathon_2026-blue" alt="OpenEnv"/>
@@ -245,17 +248,13 @@ Detailed hosted-GPU instructions are in `TRAINING.md`.
 
 | Deliverable | Link |
 |-------------|------|
-| **Hugging Face Space** | [YOUR_HF_SPACE_URL](https://huggingface.co/spaces/YOUR_USERNAME/sentinel) ← replace before submission |
+| **GitHub Repository** | [github.com/sayantikalaskar/sentinel](https://github.com/sayantikalaskar/sentinel) |
+| **Hugging Face Space** | `HF_SPACE_URL` ← replace with the final public Space URL before submission |
 | **Training Notebook (Colab)** | [`sentinel_colab_training.ipynb`](sentinel_colab_training.ipynb) |
 | **OpenEnv Manifest** | [`openenv.yaml`](openenv.yaml) |
 | **Training Guide** | [`TRAINING.md`](TRAINING.md) |
-| **Blog Write-up** | [`blog/huggingface_post.md`](blog/huggingface_post.md) |
-| **Video Script** | [`blog/youtube_script.md`](blog/youtube_script.md) |
+| **Blog Write-up** | [`Blog.MD`](Blog.MD) |
 | **Training Results** | [`results/`](results/) |
-
-Add these links before submission:
-- Hugging Face Space URL
-- Hugging Face blog URL or YouTube URL
 
 ---
 
@@ -272,18 +271,14 @@ Why:
 
 ---
 
-## Judge Checklist
+## Submission Validation
 
-- [x] uses the current OpenEnv package path via `openenv-core==0.2.3`
-- [x] provides a working TRL / Unsloth training path
-- [x] includes a Colab notebook for hosted training: [`sentinel_colab_training.ipynb`](sentinel_colab_training.ipynb)
-- [x] includes an OpenEnv manifest: [`openenv.yaml`](openenv.yaml)
-- [x] includes a FastAPI server for deployment: [`sentinel/api/server.py`](sentinel/api/server.py)
-- [x] includes blog/video draft materials
-- [x] includes result artifacts and plotting workflow
-- [x] training curves committed as PNG files (loss + reward for all 5 agents)
-- [x] before/after evaluation comparison table in README
-- [ ] add the real Hugging Face Space URL
+- [x] public repo contains committed `.png` training artifacts for both reward and loss curves
+- [x] runnable training entrypoints exist: [`train.py`](train.py), [`retrain.py`](retrain.py), and [`sentinel_colab_training.ipynb`](sentinel_colab_training.ipynb)
+- [x] root-level `Blog.MD` exists for the Hugging Face Space writeup
+- [x] `openenv.yaml` now uses the current OpenEnv manifest shape and points to `server.app:app`
+- [x] OpenEnv-compatible server wrapper exists under [`server/`](server/)
+- [ ] replace `HF_SPACE_URL` above with the final public, logged-out, cloneable Space URL
 
 ---
 
@@ -317,7 +312,6 @@ sentinel/
 ├── generate_curves.py
 ├── results/
 ├── tests/
-├── blog/
 ├── env_spec.yaml
 ├── incident_library.yaml
 ├── openenv.yaml
@@ -338,6 +332,14 @@ sentinel/
 - full tests pass
 
 This workspace is currently CPU-only, so actual GRPO training cannot be run here.
+
+---
+
+## Authors
+
+**Harsh Shukla (cyb3r ghoul)** & **Sayantika Laskar**
+
+Built for the Meta PyTorch OpenEnv Hackathon 2026
 
 ---
 

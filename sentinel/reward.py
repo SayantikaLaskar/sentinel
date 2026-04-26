@@ -212,14 +212,14 @@ class Reward_Function:
             return 0.5
         return 0.0
 
-    def _r2_mttr(self, mttr_steps: int, r1: float = 0.0) -> float:
+    def _r2_mttr(self, mttr_steps: int, r1: float | None = None) -> float:
         """Return an MTTR score inversely proportional to resolution time.
 
         Score = 1.0 / (1.0 + mttr_steps / sla_breach_threshold)
         +0.1 bonus if mttr_steps < sla_breach_threshold (pre-SLA resolution)
         Clamped to [0.0, 1.1].
 
-        If r1 == 0 (no root cause identified), MTTR score is halved
+        If r1 is explicitly 0.0 (no root cause identified), MTTR score is halved
         to discourage episodes that run to max_steps without diagnosis.
         """
         base = 1.0 / (1.0 + mttr_steps / self.sla_breach_threshold)

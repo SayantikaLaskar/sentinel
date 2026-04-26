@@ -81,49 +81,119 @@ def _append_log(message: str) -> None:
 def _health_summary() -> str:
     if _adapter is None:
         return (
-            "### Runtime Status\n"
-            "- Adapter: not initialized\n"
-            "- API health: `/health` should return `initialized: false` until reset\n"
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;">'
+            '<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+            '<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Status</div>'
+            '<div style="color:#f59e0b;font-size:20px;font-weight:700;margin-top:4px;">Idle</div></div>'
+            '<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+            '<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Steps</div>'
+            '<div style="color:#e2e8f0;font-size:20px;font-weight:700;margin-top:4px;">—</div></div>'
+            '<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+            '<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Incident</div>'
+            '<div style="color:#e2e8f0;font-size:20px;font-weight:700;margin-top:4px;">—</div></div>'
+            '<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+            '<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Reward</div>'
+            '<div style="color:#e2e8f0;font-size:20px;font-weight:700;margin-top:4px;">—</div></div>'
+            '</div>'
         )
 
     state = _adapter.state.model_dump()
+    step_count = state['step_count']
+    incident = state.get('incident_id') or '—'
+    terminated = state.get('terminated', False)
+
+    status_color = "#ef4444" if terminated else "#22c55e"
+    status_label = "Done" if terminated else "Active"
+
+    last_reward = "—"
+    if _last_step_result and "reward" in _last_step_result:
+        r = _last_step_result["reward"]
+        if isinstance(r, (int, float)):
+            last_reward = f"{r:+.3f}"
+
     return (
-        "### Runtime Status\n"
-        f"- Episode id: `{state['episode_id']}`\n"
-        f"- Step count: `{state['step_count']}`\n"
-        f"- Incident id: `{state.get('incident_id')}`\n"
-        f"- Terminated: `{state.get('terminated')}`\n"
-        f"- Truncated: `{state.get('truncated')}`\n"
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;">'
+        f'<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+        f'<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Status</div>'
+        f'<div style="color:{status_color};font-size:20px;font-weight:700;margin-top:4px;">{status_label}</div></div>'
+        f'<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+        f'<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Steps</div>'
+        f'<div style="color:#e2e8f0;font-size:20px;font-weight:700;margin-top:4px;">{step_count}</div></div>'
+        f'<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+        f'<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Incident</div>'
+        f'<div style="color:#38bdf8;font-size:20px;font-weight:700;margin-top:4px;">{incident}</div></div>'
+        f'<div style="background:#1e293b;border-radius:10px;padding:14px 20px;flex:1;min-width:140px;text-align:center;">'
+        f'<div style="color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Last Reward</div>'
+        f'<div style="color:#e2e8f0;font-size:20px;font-weight:700;margin-top:4px;">{last_reward}</div></div>'
+        '</div>'
     )
 
 
 def _service_health_html() -> str:
     if _adapter is None:
-        return "<p>No environment initialized yet.</p>"
+        return (
+            '<div style="background:#0f172a;border-radius:12px;padding:24px;text-align:center;color:#64748b;">'
+            '<p style="font-size:14px;">🔌 Environment not initialized. Click <b>Reset Episode</b> to start.</p>'
+            '</div>'
+        )
 
     env = _adapter._env
     incident_state = env.world_state.incident_state
     blast_radius = incident_state.current_blast_radius if incident_state is not None else set()
+    root_cause = incident_state.root_cause_service if incident_state is not None else None
 
+    healthy = 0
+    degraded = 0
     cells: list[str] = []
     for service, metrics in env.world_state.services.items():
-        bg = "#0f766e" if metrics.availability else "#b91c1c"
-        border = "3px solid #f59e0b" if service in blast_radius else "1px solid #334155"
+        is_blast = service in blast_radius
+        is_root = service == root_cause
+
+        if not metrics.availability:
+            bg = "#7f1d1d"
+            border_color = "#ef4444"
+            icon = "🔴"
+            degraded += 1
+        elif is_blast:
+            bg = "#78350f"
+            border_color = "#f59e0b"
+            icon = "🟡"
+            degraded += 1
+        else:
+            bg = "#064e3b"
+            border_color = "#10b981"
+            icon = "🟢"
+            healthy += 1
+
+        root_badge = ' <span style="background:#dc2626;color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;vertical-align:middle;">ROOT</span>' if is_root else ""
+        cpu_color = "#ef4444" if metrics.cpu > 0.8 else "#f59e0b" if metrics.cpu > 0.5 else "#10b981"
+        err_color = "#ef4444" if metrics.error_rate > 0.05 else "#f59e0b" if metrics.error_rate > 0.01 else "#10b981"
+
         cells.append(
-            "<div style='"
-            f"background:{bg};border:{border};border-radius:10px;padding:8px 10px;margin:4px;"
-            "display:inline-block;width:158px;vertical-align:top;color:#fff;font:12px/1.4 monospace;'>"
-            f"<b>{service}</b><br>"
-            f"CPU {metrics.cpu * 100:.1f}%<br>"
-            f"Err {metrics.error_rate * 100:.2f}%<br>"
-            f"Latency {metrics.latency_ms:.0f} ms"
-            "</div>"
+            f'<div style="background:{bg};border:2px solid {border_color};border-radius:8px;'
+            f'padding:10px 12px;margin:3px;display:inline-block;width:170px;vertical-align:top;'
+            f'color:#fff;font:12px/1.5 ui-monospace,monospace;">'
+            f'<div style="font-weight:700;font-size:13px;margin-bottom:4px;">{icon} {service}{root_badge}</div>'
+            f'<div>CPU <span style="color:{cpu_color};font-weight:600;">{metrics.cpu * 100:.0f}%</span></div>'
+            f'<div>Err <span style="color:{err_color};font-weight:600;">{metrics.error_rate * 100:.1f}%</span></div>'
+            f'<div>Lat <span style="font-weight:600;">{metrics.latency_ms:.0f}ms</span></div>'
+            '</div>'
         )
 
+    summary = (
+        f'<div style="display:flex;gap:16px;margin-bottom:12px;font-size:13px;color:#cbd5e1;">'
+        f'<span>🟢 Healthy: <b>{healthy}</b></span>'
+        f'<span>🔴 Degraded: <b>{degraded}</b></span>'
+        f'<span>📊 Total: <b>{healthy + degraded}</b></span>'
+        f'</div>'
+    )
+
     return (
-        "<div style='background:#0f172a;padding:12px;border-radius:12px;'>"
+        f'<div style="background:#0f172a;padding:16px;border-radius:12px;">'
+        f'{summary}'
+        f'<div style="display:flex;flex-wrap:wrap;gap:0;">'
         + "".join(cells)
-        + "</div>"
+        + '</div></div>'
     )
 
 
@@ -178,7 +248,7 @@ def _reset_env(seed: int, incident_id: str) -> tuple[str, str, str, str, str, st
     }
     _append_log(f"reset(seed={seed}, incident_id={adapter.state.incident_id})")
     return _snapshot(
-        f"Reset succeeded. Episode `{adapter.state.episode_id}` is ready at step `0`."
+        f"> ✅ **Reset succeeded** — Episode `{adapter.state.episode_id[:8]}…` ready. Incident **{adapter.state.incident_id}** loaded."
     )
 
 
@@ -204,8 +274,9 @@ def _run_action(action_name: str) -> tuple[str, str, str, str, str, str, str]:
     _append_log(
         f"{payload['agent']}::{payload['name']} -> reward={observation.reward:.3f}, done={observation.done}"
     )
+    reward_icon = "🟢" if observation.reward > 0 else "🔴" if observation.reward < -0.2 else "🟡"
     return _snapshot(
-        f"Action `{payload['name']}` executed. Reward: `{observation.reward:.3f}`. Done: `{observation.done}`."
+        f"> {reward_icon} **{payload['agent'].title()}** → `{payload['name']}` — Reward: **{observation.reward:+.3f}** | Done: **{observation.done}**"
     )
 
 
@@ -235,8 +306,9 @@ def _run_custom_action(action_json: str) -> tuple[str, str, str, str, str, str, 
     _append_log(
         f"{payload['agent']}::{payload['name']} -> reward={observation.reward:.3f}, done={observation.done}"
     )
+    reward_icon = "🟢" if observation.reward > 0 else "🔴" if observation.reward < -0.2 else "🟡"
     return _snapshot(
-        f"Custom action `{payload['name']}` executed. Reward: `{observation.reward:.3f}`. Done: `{observation.done}`."
+        f"> {reward_icon} **Custom** → `{payload['name']}` — Reward: **{observation.reward:+.3f}** | Done: **{observation.done}**"
     )
 
 
@@ -285,9 +357,9 @@ def _run_smoke_test(seed: int, incident_id: str) -> tuple[str, str, str, str, st
     )
 
     status = (
-        "Smoke test PASSED. Reset, step, state, and observation schema are working."
+        "> ✅ **Smoke test PASSED** — `reset`, `step`, `state`, and observation schema all verified."
         if ok
-        else f"Smoke test FAILED. Missing keys: {missing}"
+        else f"> ❌ **Smoke test FAILED** — Missing keys: {missing}"
     )
     return _snapshot(status)
 
@@ -299,83 +371,141 @@ def build_dashboard() -> Any:
     cfg = load_config()
     default_action = _json_blob(cfg.training.placeholder_action)
 
-    with gr.Blocks(title="SENTINEL Validation Console", theme=gr.themes.Default()) as dashboard:
-        gr.Markdown(
-            """
-# SENTINEL Validation Console
+    css = """
+    .gradio-container { max-width: 1200px !important; }
+    .status-banner { padding: 10px 16px; border-radius: 8px; font-size: 14px; }
+    """
 
-This Space is designed to prove the submission requirements directly:
+    with gr.Blocks(
+        title="SENTINEL — Incident Response Environment",
+    ) as dashboard:
 
-1. the public Space boots correctly,
-2. the OpenEnv adapter can `reset`, `step`, and expose `state`,
-3. the environment returns structured observations,
-4. validators can inspect the live API at `/health` and `/docs`.
-
-Use `Reset Episode`, then a preset action or `Run Validator Smoke Test`.
-"""
+        # ── Header ────────────────────────────────────────────
+        gr.HTML(
+            '<div style="text-align:center;padding:20px 0 8px;">'
+            '<h1 style="margin:0;font-size:32px;">🛡️ SENTINEL</h1>'
+            '<p style="color:#64748b;margin:6px 0 0;font-size:15px;">'
+            'Multi-Agent Incident Response Environment &mdash; '
+            '<a href="/health" target="_blank">/health</a> · '
+            '<a href="/docs" target="_blank">/docs</a> · '
+            '<a href="https://github.com/sayantikalaskar/sentinel" target="_blank">GitHub</a>'
+            '</p></div>'
         )
 
+        # ── Status bar ────────────────────────────────────────
+        status = gr.Markdown(
+            value='> ⏳ **Ready** — Click "Reset Episode" to initialize the environment.',
+            elem_classes=["status-banner"],
+        )
+
+        # ── KPI cards ─────────────────────────────────────────
+        runtime = gr.HTML(value=_health_summary())
+
+        # ── Controls ──────────────────────────────────────────
         with gr.Row():
+            with gr.Column(scale=1, min_width=120):
+                seed = gr.Number(value=cfg.demo.seed, precision=0, label="Seed")
+            with gr.Column(scale=1, min_width=120):
+                incident_id = gr.Dropdown(
+                    choices=_INCIDENT_IDS,
+                    value=_INCIDENT_IDS[0],
+                    label="Incident",
+                )
+            with gr.Column(scale=1, min_width=160):
+                reset_btn = gr.Button("▶  Reset Episode", variant="primary", size="lg")
+            with gr.Column(scale=1, min_width=160):
+                smoke_btn = gr.Button("🧪  Smoke Test", variant="secondary", size="lg")
+
+        # ── Service Health Grid ───────────────────────────────
+        with gr.Accordion("🏥 Service Health Grid (30 services)", open=True):
+            health_grid = gr.HTML(value=_service_health_html())
+
+        # ── Agent Actions ─────────────────────────────────────
+        gr.Markdown("### 🎮 Agent Actions")
+        gr.Markdown(
+            "*Each button sends a preset action from a specific agent role. "
+            "Hover for details.*",
+        )
+        with gr.Row():
+            query_logs_btn = gr.Button("🔍 Holmes: Query Logs", size="sm")
+            query_metrics_btn = gr.Button("📊 Argus: Query Metrics", size="sm")
+            restart_btn = gr.Button("🔧 Forge: Restart Service", size="sm")
+            escalate_btn = gr.Button("🚨 Oracle: Escalate", size="sm")
+
+        # ── Two-column: results + log ─────────────────────────
+        with gr.Row():
+            with gr.Column(scale=3):
+                with gr.Tabs():
+                    with gr.Tab("📋 Step Result"):
+                        latest_step = gr.Code(
+                            value=_json_blob(_last_step_result),
+                            language="json",
+                            label="Latest Step Result",
+                        )
+                    with gr.Tab("👁 Observation"):
+                        observation_json = gr.Code(
+                            value=_json_blob(_last_observation),
+                            language="json",
+                            label="Observation",
+                        )
+                    with gr.Tab("🔧 State"):
+                        state_json = gr.Code(
+                            value=_current_state_json(),
+                            language="json",
+                            label="Adapter State",
+                        )
+                    with gr.Tab("🎬 Render"):
+                        render_output = gr.Textbox(
+                            value=_render_snapshot(),
+                            label="Environment Render",
+                            lines=10,
+                            interactive=False,
+                        )
             with gr.Column(scale=2):
-                status = gr.Markdown("Ready. Initialize the environment with `Reset Episode`.")
-                runtime = gr.Markdown(_health_summary())
-            with gr.Column(scale=1):
-                gr.Markdown(
-                    """
-### Public Endpoints
-- `/health`
-- `/docs`
-- `/dashboard`
-
-### Recommended Check
-Run the smoke test after reset. It validates `reset`, two `step` calls, and observation keys.
-"""
-                )
-
-        with gr.Row():
-            seed = gr.Number(value=cfg.demo.seed, precision=0, label="Seed")
-            incident_id = gr.Dropdown(choices=_INCIDENT_IDS, value=_INCIDENT_IDS[0], label="Incident")
-            reset_btn = gr.Button("Reset Episode", variant="primary")
-            smoke_btn = gr.Button("Run Validator Smoke Test", variant="secondary")
-
-        with gr.Row():
-            query_logs_btn = gr.Button("Query Logs")
-            query_metrics_btn = gr.Button("Query Metrics")
-            restart_btn = gr.Button("Restart Service")
-            escalate_btn = gr.Button("Escalate To Human")
-
-        health_grid = gr.HTML(value=_service_health_html(), label="Service Health")
-
-        with gr.Row():
-            with gr.Column():
-                custom_action = gr.Code(
-                    value=default_action,
-                    language="json",
-                    label="Custom Action JSON",
-                )
-                custom_btn = gr.Button("Run Custom Action")
-            with gr.Column():
                 action_log = gr.Textbox(
                     value=_current_log_text(),
-                    label="Action Log",
-                    lines=12,
+                    label="📜 Action Log",
+                    lines=14,
                     interactive=False,
                 )
 
-        with gr.Row():
-            state_json = gr.Code(value=_current_state_json(), language="json", label="Adapter State")
-            latest_step = gr.Code(value=_json_blob(_last_step_result), language="json", label="Latest Step Result")
+        # ── Custom Action ─────────────────────────────────────
+        with gr.Accordion("⚡ Custom Action (Advanced)", open=False):
+            gr.Markdown(
+                "Send any valid JSON action. The `agent` field must match a valid role "
+                "(`holmes`, `forge`, `argus`, `hermes`, `oracle`)."
+            )
+            custom_action = gr.Code(
+                value=default_action,
+                language="json",
+                label="Action JSON",
+            )
+            custom_btn = gr.Button("Run Custom Action", variant="secondary")
 
-        with gr.Row():
-            observation_json = gr.Code(value=_json_blob(_last_observation), language="json", label="Latest Observation")
+        # ── How It Works ──────────────────────────────────────
+        with gr.Accordion("ℹ️  How This Works", open=False):
+            gr.Markdown(
+                """
+**SENTINEL** simulates a 30-service cloud platform experiencing an outage.
 
-        render_output = gr.Textbox(
-            value=_render_snapshot(),
-            label="Environment Render Snapshot",
-            lines=8,
-            interactive=False,
-        )
+**Workflow:**
+1. **Reset** — Injects a failure into the service graph. Cascading damage spreads.
+2. **Investigate** — Holmes queries logs/metrics to find the root cause.
+3. **Remediate** — Forge restarts/scales/rolls back affected services.
+4. **Resolve** — Oracle escalates or closes the incident.
 
+**Reward Signal:**
+- R1 (35%): Did the agent identify the correct root cause?
+- R2 (30%): How fast was the resolution (MTTR)?
+- R3 (25%): How fully did services recover?
+- R4 (10%): Was blast radius contained?
+
+**Color Legend:**
+🟢 Healthy — 🟡 In blast radius — 🔴 Down/Unavailable — `ROOT` = root cause service
+"""
+            )
+
+        # ── Wire up events ────────────────────────────────────
         outputs = [status, runtime, health_grid, state_json, observation_json, latest_step, action_log]
 
         reset_btn.click(fn=_reset_env, inputs=[seed, incident_id], outputs=outputs)
